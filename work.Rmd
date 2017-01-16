@@ -1,0 +1,475 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Cmd+Shift+Enter*. 
+
+```{r}
+data = read.csv(paste0( OUTPUT_ROOT,"all_rosters.csv") )
+recordData = readRDS("~/git/nfl_player_vis/data/nflHistory.rda")
+
+recordData = recordData %>% 
+  mutate( team_abbr = tolower(abbrev ) ) %>%
+  unite( team_year, team_abbr, Year ) 
+```
+
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+
+  getNumStartingQbs =  function(data){
+   d = data %>%
+     filter( Pos == "QB" | Pos == "qb") %>%
+     filter ( GS > 0 ) %>%
+     filter ( !is.na(GS)) %>%
+     group_by( team_abbr, year ) %>%
+     select( Player, team_abbr, year , GS) %>%
+     summarize( num_starting_qbs = n() ) %>%
+     ungroup() %>%
+     arrange(num_starting_qbs ) 
+  }
+
+ dd = getNumStartingQbs(data) %>%
+    group_by( team_abbr ) %>%
+    summarize( avg_starting_qbs =  mean(num_starting_qbs ))
+  dd$team_abbr =  factor(dd$team_abbr, levels = dd$team_abbr[order(dd$avg_starting_qbs)])
+  ggplot( 
+    dd
+    ,
+    aes( x = team_abbr, y = avg_starting_qbs )
+  ) + geom_bar(stat='identity') +
+    coord_flip() +
+    theme(
+      axis.text.y=element_text(size=14,face="bold"),
+      axis.title.x=element_text(size=14,face="bold"),
+      axis.title.y = element_blank()
+    )  +
+   xlab("") + 
+    ylab("Starting QBs per season ( avg 1975 - present ) " )
+```
+
+
+
+
+```{r}
+getNumStartingQbs(data) %>%
+  ungroup() %>%
+  filter( num_starting_qbs > 2) %>%
+  group_by( team_abbr ) %>%
+  arrange( year) %>%
+  summarize(years = paste(year, collapse = "," )) %>%
+  arrange( team_abbr )
+```
+
+
+
+```{r}
+
+  getNumStartingPlayers =  function(data){
+   d = data %>%
+     filter ( GS > 0 ) %>%
+     filter ( !is.na(GS)) %>%
+     group_by( team_abbr, year ) %>%
+     select( Player, team_abbr, year , GS) %>%
+     summarize( num_starting_players = n() ) %>%
+     ungroup() %>%
+     arrange(num_starting_players ) 
+  }
+
+ggplot( 
+  getNumStartingPlayers(data),
+  aes( x = num_starting_players)
+  ) + geom_bar()
+
+```
+
+
+```{r}
+d = getNumStartingPlayers(data) %>%
+  arrange(desc(num_starting_players) )
+d
+```
+
+
+Turns out 1987 was a strike shortened year
+
+```{r}
+d = getNumStartingPlayers(data) %>%
+  ungroup() %>%
+  group_by(year) %>% 
+  summarize( num_starting_players = mean( num_starting_players ) )
+
+ggplot( d, aes ( x = year, y = num_starting_players )) +
+  geom_line() +
+    theme(
+      axis.title.x=element_text(size=14,face="bold")
+    ) +
+  ylab( "Average  number of players who started a game")
+
+
+```
+
+
+```{r}
+
+
+filterByPosition = function( data, target_position ){
+  data %>% filter( Pos == target_position | Pos == tolower(target_position))
+}
+
+d = getNumStartingPlayers(data) 
+ggplot( d, aes ( x = year, y = num_starting_players )) +
+  geom_point() +
+    theme(
+      axis.title.x=element_text(size=14,face="bold")
+    ) +
+  ylab( "Number of players who started a game")
+```
+
+```{r}
+
+d = data %>% filterByPosition("QB") %>% getNumStartingPlayers() 
+ggplot( d, aes ( x = year, y = num_starting_players )) +
+  geom_jitter() +
+    theme(
+      axis.title.x=element_text(size=14,face="bold")
+    ) +
+  ylab( "Number of qbs who started a game")
+
+```
+
+
+```{r}
+d = getNumStartingPlayers(data) %>%
+  ungroup() %>%
+  group_by( year ) %>%
+  mutate( mean = mean( num_starting_players), sd = sd ( num_starting_players)) %>%
+  mutate( num_starting_players_z = ( num_starting_players - mean ) /sd ) %>%
+  select( team_abbr, year, num_starting_players, num_starting_players_z )
+
+teams = c('cle', 'nwe')
+ggplot( d %>% filter( team_abbr %in% teams) , aes( x = year, y = num_starting_players_z)) +
+  geom_line( )  + 
+  facet_grid ( team_abbr ~ .) +
+  geom_hline(yintercept = 0)
+
+```
+
+
+
+```{r}
+
+
+target_position = "QB"
+d = data %>% filterByPosition(target_position) %>%
+  getNumStartingPlayers( ) %>%
+  ungroup() %>%
+  group_by( year ) %>%
+  mutate( mean = mean( num_starting_players), sd = sd ( num_starting_players)) %>%
+  mutate( num_starting_players_z = ( num_starting_players - mean ) /sd ) %>%
+  select( team_abbr, year, num_starting_players, num_starting_players_z )
+
+teams = c('cle', 'nwe' , 'pit')
+ggplot( d %>% filter( team_abbr %in% teams) , aes( x = year, y = num_starting_players, color = team_abbr)) +
+  geom_point( )  +
+  geom_line( )  +
+  ylab( "Num starting qbs") + 
+  facet_grid( team_abbr ~ . )
+
+```
+
+
+```{r}
+ 
+
+joinWithRecordData = function( d ) {
+  d %>% 
+    unite( team_year, team_abbr, year , remove =FALSE) %>%
+    left_join( recordData, by = 'team_year')
+}
+
+ggplot( 
+  d %>% 
+    joinWithRecordData() %>%
+    select( winPerc, Tm, num_starting_players , year) %>%
+    mutate( num_starting_qbs = num_starting_players ),
+  aes( x = winPerc, color = as.factor(num_starting_qbs) )
+  ) +  geom_density()
+```
+
+
+```{r}
+
+ggplot( 
+  d %>% 
+    joinWithRecordData() %>%
+    select( winPerc, Tm, num_starting_players , year) %>%
+    mutate( num_starting_qbs = num_starting_players ) %>%
+    group_by( num_starting_qbs )  %>% 
+    summarize( mean_win_perctenage = mean ( winPerc )),
+  aes( x = num_starting_qbs, y = mean_win_perctenage )
+  ) +  geom_bar(stat='identity')
+```
+
+
+```{r}
+d = data %>% 
+  getNumStartingPlayers( ) %>%
+  ungroup() %>%
+  group_by( year ) %>%
+  mutate( mean = mean( num_starting_players), sd = sd ( num_starting_players)) %>%
+  mutate( num_starting_players_z = ( num_starting_players - mean ) /sd ) %>%
+  select( team_abbr, year, num_starting_players, num_starting_players_z ) %>%
+  joinWithRecordData()
+ggplot( 
+  d %>% 
+    select( winPerc, Tm, num_starting_players_z , year),
+  aes( x = winPerc, y = num_starting_players_z)
+  ) +  geom_point() +
+    geom_point(
+    
+    data =  d %>% 
+      filter( year == 2016 )%>%
+      filter( team_abbr == "cle" |  team_abbr == "dal") ,
+    aes( color = team_abbr )
+
+    
+  ) + 
+  scale_colour_manual( name = "Season", values= c('cle' = 'orange', 'dal' = 'blue' ), labels = c('2016 Browns', '2016 Cowboys')) +
+  xlab( "Win percentage") +
+  ylab( "Number of starting players ( normalized ) ")
+
+```
+
+
+
+Teams since 2005 with the fewest players who started a game:
+```{r}
+d %>% 
+  filter( year > 2005 )%>%
+  top_n( 10, -num_starting_players_z ) %>%
+  select(winPerc, Tm, year, num_starting_players_z, num_starting_players) %>%
+  arrange( desc(winPerc) )
+```
+
+Teams since 2005 with few starters, and fewer than 9 wins
+```{r}
+d %>% 
+  filter( year > 2005 )%>%
+  top_n( 10, -num_starting_players_z ) %>%
+  select(winPerc, Tm, year, num_starting_players_z, num_starting_players) %>%
+  arrange( winPerc ) %>%
+  filter( winPerc <= 0.5)
+```
+
+Teams since 2005 with the most starting players
+```{r}
+d %>% 
+  filter( year > 2005 )%>%
+  top_n( 10, num_starting_players_z ) %>%
+  select(winPerc, Tm, year, num_starting_players_z, num_starting_players) %>%
+  arrange( desc(winPerc) )
+```
+
+Teams since 2005 with lots of starters, and more than 8 wins
+```{r}
+d %>% 
+  filter( year > 2005 )%>%
+  top_n( 10, num_starting_players_z ) %>%
+  select(winPerc, Tm, year, num_starting_players_z, num_starting_players) %>%
+  arrange( desc(winPerc) ) %>%
+  filter( winPerc > 0.5)
+
+```
+```{r}
+ggplot( 
+  d %>% 
+    filter( year > 2005 )%>%
+    select( winPerc, Tm, num_starting_players_z , year),
+  aes( x = winPerc, y = num_starting_players_z, color = Tm)
+  ) +  
+    geom_point(color ='black', alpha = 0.2) + 
+  geom_point(
+    
+    data =  d %>% 
+      filter( year > 2005 )%>%
+      filter( team_abbr == "cle" | team_abbr == "nwe" | team_abbr == "dal") 
+
+    
+  )
+
+```
+
+
+Mean num starting players, by team since 2005
+```{r}
+
+d2 =   d %>% 
+    filter( year > 2005 )%>%
+    select( winPerc, Tm, num_starting_players_z , year, team_abbr) %>%
+    group_by( team_abbr ) %>%
+    summarize(num_starting_players_z =  mean(num_starting_players_z), winPerc = mean(winPerc), Tm = first(Tm))
+ggplot( d2, aes( x = num_starting_players_z , y = winPerc, label = team_abbr ) ) + 
+  geom_text()
+
+```
+
+How does a team evolve over time?  In terms of their num starts versus win percentage
+```{r}
+d2 = d %>% 
+  filter( year > 2005 )%>%
+  filter( team_abbr == "cle" | team_abbr == "nwe" | team_abbr == "rav") %>%
+  arrange( year) %>%
+  group_by( team_abbr ) %>%
+  select(winPerc, Tm, year, num_starting_players_z, num_starting_players) 
+d2
+ggplot( d2, aes( x = num_starting_players_z, y = winPerc ,label = year, color = Tm)) +
+  geom_text( ) + 
+  geom_path() + 
+  xlim(c( -2, 2) ) +
+    ylim(c(0, 1) ) 
+
+```
+
+
+We would like to know more about what is up with the patriots having so many starters.
+
+Let's look at their number of starters by position, so we can get some idea.
+```{r}
+dd = data %>%
+  filter( GS > 0 ) %>%
+  filter( !is.na( GS ) ) %>%
+  mutate( Pos = tolower( Pos)) %>%
+  group_by( year,  team_abbr, Pos ) %>%
+  summarize( num_starters = n(), meanGS = mean ( GS), max_GS = max (GS), min_GS  = min (GS) ) %>%
+  ungroup() %>%
+  group_by( year, Pos ) %>%
+  mutate( mean_num_starters = mean( num_starters ), mean_max_GS = mean(max_GS ), mean_min_GS = mean(min_GS )) %>%
+  mutate( num_starters_deviation = num_starters - mean_num_starters) %>%
+  filter( team_abbr == "nwe" ) %>%
+  filter( year == 2013 ) %>%
+  ungroup() %>%
+  arrange(desc(num_starters_deviation) ) 
+
+dd
+
+dd %>%
+  select( year, team_abbr, Pos, num_starters, num_starters_deviation)
+```
+
+
+```{r}
+data %>% 
+  filter( team_abbr == 'dal', year == 2016 ) %>%
+  filter ( GS > 0 ) %>%
+  select( Pos , GS, Player ) %>%
+  arrange( Pos )
+
+
+```
+
+In 2013-2015, the Patriots seem to have used a well above average number of running backs 
+
+```{r}
+
+
+dd =  d %>% 
+    joinWithRecordData() %>%
+    select( winPerc, Tm, num_starting_players_z , year)
+
+model = lm( winPerc ~ num_starting_players_z, dd  )
+summary(model)
+```
+
+
+```{r}
+
+d = data %>% 
+     filter ( GS > 0 ) %>%
+     filter ( !is.na(GS)) %>%
+     mutate( Pos = tolower(Pos)) %>%
+     group_by( team_abbr, year, Pos ) %>%
+     filter( Pos != "") %>%
+     select( Player, team_abbr, year , GS, Pos) %>%
+     summarize( num_starting_players = n() ) %>%
+     ungroup() %>%
+     arrange(num_starting_players ) 
+
+dd =  d %>% group_by( Pos ) %>%
+        summarize( m = mean ( num_starting_players) )
+dd$Pos =  factor(dd$Pos, levels = dd$Pos[order(dd$m)])
+
+
+ggplot(dd
+        , aes ( x = Pos, y = m)) + 
+  geom_bar( stat='identity') + 
+  coord_flip()
+
+```
+
+```{r}
+d = data %>% 
+     filter ( GS > 0 ) %>%
+     filter ( !is.na(GS)) %>%
+     mutate( Pos = tolower(Pos)) %>%
+     group_by( team_abbr, year, Pos ) %>%
+     filter( Pos != "") %>%
+     select( Player, team_abbr, year , GS, Pos) %>%
+     summarize( num_starting_players = n() ) %>%
+     ungroup() %>%
+     arrange(num_starting_players )  %>%
+     group_by(year, Pos) %>%
+     mutate( mean_starters = mean ( num_starting_players), 
+             sd_starters = sd ( num_starting_players )) %>%
+    filter( sd_starters != 0 ) %>%
+    mutate( num_starters_z = (num_starting_players - mean_starters) / sd_starters, count = n())  %>%
+    filter( count > 30 ) %>%
+    ungroup()
+
+dd =  d %>% 
+      joinWithRecordData() %>%
+      select( winPerc, Tm, num_starters_z , year, Pos) %>%
+      filter(!is.na( num_starters_z )) %>%
+      spread( Pos, num_starters_z)
+
+#This model didnt work ( too many NAs)
+#model = lm( winPerc ~c  +cb + db + de + dt + fb + fs + lb + lcb +  lg + lt + ot + qb  + rb + rcb + rg + rt + ss + te  + wr, dd
+#    )
+
+
+model = lm( winPerc ~ c  + de   + fs  +  lg + lt + qb  + rb + rg + rt + te  + wr , dd )
+
+summary(model)
+  
+```
+
+These are the top teams that had three or more quarterbacks start in a given year.
+```{r}
+
+getNumStartingQbs(data) %>%
+        joinWithRecordData() %>%
+        ungroup() %>%
+        group_by( num_starting_qbs ) %>%
+        arrange( desc( winPerc)) %>%
+        filter( num_starting_qbs >= 3 ) %>%
+        top_n( 5, winPerc)
+```
+
+
+And these are the worst teams with only one starting quarterback
+
+```{r}
+
+getNumStartingQbs(data) %>%
+        joinWithRecordData() %>%
+        group_by( num_starting_qbs ) %>%
+        arrange( ( winPerc)) %>%
+        filter( num_starting_qbs <= 2 ) %>%
+        top_n( 20, 1.0 - winPerc)
+```
